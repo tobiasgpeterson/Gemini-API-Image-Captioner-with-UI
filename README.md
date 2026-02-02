@@ -25,4 +25,4 @@ pyinstaller --noconsole --onefile captioner_withUI.py
 ```
 
 ### Downloads
-Download [here](https://pages.github.com/).
+Download [here](https://github.com/tobiasgpeterson/Gemini-API-Image-Captioner-with-UI/releases/download/main/GeminiImageCaptioner_withUI.exe).
