@@ -1,6 +1,12 @@
+#build .exe with:
+#pyinstaller --onefile captioner_withUI.py
+
+#generated using ai slop, output verified by real programmer TM
+
 import tkinter as tk
 from tkinter import ttk, scrolledtext, filedialog, messagebox
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from PIL import Image
 import os
 import threading
@@ -10,14 +16,23 @@ import json
 # --- CONSTANTS ---
 CONFIG_FILE = "caption_config.json"
 
+# Updated with the latest widely known models, keeping the futuristic ones at the top.
 MODEL_OPTIONS = [
+    "gemini-pro-latest",
+    "gemini-flash-latest",
+    "gemini-flash-lite-latest",
+    "gemini-3.5-flash",
+    "gemini-3.1-flash-lite",
     "gemini-3-flash-preview",
-    "gemini-3-pro-preview",
+    "gemini-3.1-pro-preview",
     "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
+    "gemini-2.5-pro",
     "gemini-2.0-flash",
-    "gemini-2.0-flash-lite",
-    "gemini-2.5-pro"
+    "gemini-2.0-flash-lite-preview-02-05",
+    "gemini-2.0-pro-exp-02-05",
+    "gemini-1.5-flash",
+    "gemini-1.5-pro"
 ]
 
 DEFAULT_SYSTEM_INSTRUCTION = """"""
@@ -36,8 +51,8 @@ AIzaSyCInsertYourThirdAPIKeyHere
 class CaptionApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Gemini Image Captioner v2.1 (Gemini 3 NSFW Capable)")
-        self.root.geometry("600x950")  # Increased height slightly for new field
+        self.root.title("Gemini Image Captioner v2.3 (New SDK Compatible)")
+        self.root.geometry("600x1100")
         
         # Styles
         style = ttk.Style()
@@ -51,7 +66,7 @@ class CaptionApp:
         lbl_keys = tk.Label(main_frame, text="API Keys", font=("Arial", 10, "bold"), anchor="w")
         lbl_keys.pack(fill=tk.X, pady=(0, 2))
         
-        lbl_keys_explainer = tk.Label(main_frame, text="This program will use the first Gemini API Key until the free tier usage limit has been exhausted for all models in the dropdown list, it will then move to the second key and use that until it is exhausted, so on and so forth until all images are captioned. Enter your Google API keys (one per line). logic: Cycle Keys -> If all fail -> Switch Model -> Cycle Keys.", anchor="w", justify=tk.LEFT, wraplength=580)
+        lbl_keys_explainer = tk.Label(main_frame, text="This program will use the first Gemini API Key until the free tier usage limit has been exhausted, it will then move to the second key and use that until it is exhausted, etc. logic: Cycle Keys -> If all fail -> Switch Model -> Cycle Keys.", anchor="w", justify=tk.LEFT, wraplength=580)
         lbl_keys_explainer.pack(fill=tk.X)
 
         self.txt_api_keys = scrolledtext.ScrolledText(main_frame, height=4, font=("Consolas", 9))
@@ -70,7 +85,7 @@ class CaptionApp:
         btn_browse = tk.Button(path_frame, text="Browse", command=self.browse_folder)
         btn_browse.pack(side=tk.RIGHT)
 
-        # 3. SYSTEM INSTRUCTIONS (NEW)
+        # 3. SYSTEM INSTRUCTIONS
         lbl_sys_instr = tk.Label(main_frame, text="System Instructions (Context/Persona)", font=("Arial", 10, "bold"), anchor="w")
         lbl_sys_instr.pack(fill=tk.X, pady=(10, 2))
 
@@ -84,18 +99,27 @@ class CaptionApp:
         self.txt_prompt = scrolledtext.ScrolledText(main_frame, height=5, font=("Arial", 9))
         self.txt_prompt.pack(fill=tk.X, pady=5)
 
-        # 5. MODEL
-        lbl_model = tk.Label(main_frame, text="Starting Model", font=("Arial", 10, "bold"), anchor="w")
+        # 5. CUSTOM MODELS
+        lbl_custom_models = tk.Label(main_frame, text="Custom Models to Try First (One per line, Optional)", font=("Arial", 10, "bold"), anchor="w")
+        lbl_custom_models.pack(fill=tk.X, pady=(10, 2))
+        lbl_custom_explainer = tk.Label(main_frame, text="These model IDs will be used FIRST in order. If they hit a limit or fail, it will fall back to the dropdown.", anchor="w", justify=tk.LEFT, wraplength=580)
+        lbl_custom_explainer.pack(fill=tk.X)
+
+        self.txt_custom_models = scrolledtext.ScrolledText(main_frame, height=3, font=("Consolas", 9))
+        self.txt_custom_models.pack(fill=tk.X, pady=5)
+
+        # 6. MODEL FALLBACK
+        lbl_model = tk.Label(main_frame, text="Dropdown Fallback Model", font=("Arial", 10, "bold"), anchor="w")
         lbl_model.pack(fill=tk.X, pady=(10, 2))
 
         self.combo_model = ttk.Combobox(main_frame, values=MODEL_OPTIONS)
         self.combo_model.pack(fill=tk.X, pady=5)
 
-        # 6. START BUTTON
+        # 7. START BUTTON
         self.btn_start = tk.Button(main_frame, text="Start Captioning (Saves Config)", bg="#4CAF50", fg="white", font=("Arial", 12, "bold"), command=self.start_thread)
         self.btn_start.pack(fill=tk.X, pady=15)
 
-        # 7. LOG
+        # 8. LOG
         lbl_log = tk.Label(main_frame, text="Log", font=("Arial", 10, "bold"), anchor="w")
         lbl_log.pack(fill=tk.X, pady=(0, 2))
 
@@ -142,13 +166,17 @@ class CaptionApp:
                 self.entry_path.delete(0, tk.END)
                 self.entry_path.insert(0, data.get('folder_path', ''))
 
-                # Set System Instruction (NEW)
+                # Set System Instruction
                 self.txt_sys_instruction.delete('1.0', tk.END)
                 self.txt_sys_instruction.insert(tk.END, data.get('system_instruction', DEFAULT_SYSTEM_INSTRUCTION))
 
                 # Set Prompt
                 self.txt_prompt.delete('1.0', tk.END)
                 self.txt_prompt.insert(tk.END, data.get('prompt', DEFAULT_PROMPT))
+
+                # Set Custom Models
+                self.txt_custom_models.delete('1.0', tk.END)
+                self.txt_custom_models.insert(tk.END, data.get('custom_models', ''))
 
                 # Set Model
                 saved_model = data.get('model', MODEL_OPTIONS[0])
@@ -170,13 +198,14 @@ class CaptionApp:
         self.txt_prompt.insert(tk.END, DEFAULT_PROMPT)
         self.combo_model.current(0)
 
-    def save_config(self, api_keys_list, folder_path, sys_instruction, prompt, model):
+    def save_config(self, api_keys_list, folder_path, sys_instruction, prompt, custom_models_text, model):
         """Saves current UI settings to JSON."""
         data = {
             "api_keys": api_keys_list,
             "folder_path": folder_path,
             "system_instruction": sys_instruction,
             "prompt": prompt,
+            "custom_models": custom_models_text,
             "model": model
         }
         try:
@@ -194,10 +223,10 @@ class CaptionApp:
         api_keys = [k.strip() for k in raw_keys.split('\n') if k.strip()]
         folder_path = self.entry_path.get().strip()
         
-        # Get both instructions
         sys_instruction_text = self.txt_sys_instruction.get("1.0", tk.END).strip()
         prompt_text = self.txt_prompt.get("1.0", tk.END).strip()
         
+        custom_models_text = self.txt_custom_models.get("1.0", tk.END).strip()
         start_model_name = self.combo_model.get()
 
         # Validation
@@ -209,49 +238,63 @@ class CaptionApp:
             return
 
         # Save config before starting
-        self.save_config(api_keys, folder_path, sys_instruction_text, prompt_text, start_model_name)
+        self.save_config(api_keys, folder_path, sys_instruction_text, prompt_text, custom_models_text, start_model_name)
 
         self.is_running = True
         self.btn_start.config(state='disabled', text="Processing...")
         
         thread = threading.Thread(
             target=self.process_images, 
-            args=(api_keys, folder_path, sys_instruction_text, prompt_text, start_model_name)
+            args=(api_keys, folder_path, sys_instruction_text, prompt_text, custom_models_text, start_model_name)
         )
         thread.daemon = True
         thread.start()
 
-    def configure_genai(self, api_key, model_name, system_instruction=None):
-        """Helper to set up the client with specific key, model, and system instruction"""
+    def create_client(self, api_key):
+        """Helper to set up the new Google GenAI Client"""
         try:
-            genai.configure(api_key=api_key)
-            
-            # system_instruction is passed to the constructor
-            if system_instruction:
-                model = genai.GenerativeModel(model_name, system_instruction=system_instruction)
-            else:
-                model = genai.GenerativeModel(model_name)
-                
-            return model
-        except Exception:
+            client = genai.Client(api_key=api_key)
+            return client
+        except Exception as e:
+            self.log(f"⚠️ SDK Client Error: {e}")
             return None
 
-    def process_images(self, api_keys, folder_path, sys_instruction_text, prompt_text, start_model_name):
+    def process_images(self, api_keys, folder_path, sys_instruction_text, prompt_text, custom_models_text, start_model_name):
         self.log(f"--- Starting Process ---")
         
-        # Determine starting index for model
+        # 1. Parse custom models from the multiline text box
+        custom_models_list = [m.strip() for m in custom_models_text.split('\n') if m.strip()]
+        
+        # 2. Determine dropdown fallback models (Starting from the user's dropdown selection)
         try:
-            current_model_index = MODEL_OPTIONS.index(start_model_name)
+            dropdown_start_index = MODEL_OPTIONS.index(start_model_name)
         except ValueError:
-            current_model_index = 0
+            dropdown_start_index = 0
+        fallback_models_list = MODEL_OPTIONS[dropdown_start_index:]
+        
+        # 3. Combine both lists (Deduplicate while preserving order)
+        all_models_to_try = []
+        for m in custom_models_list + fallback_models_list:
+            if m not in all_models_to_try:
+                all_models_to_try.append(m)
+
+        if not all_models_to_try:
+            self.log("🛑 CRITICAL: No models available to process.")
+            self.reset_ui()
+            return
 
         current_key_index = 0
+        current_model_idx = 0
         
         # Initial Configuration
-        active_model_name = MODEL_OPTIONS[current_model_index]
+        active_model_name = all_models_to_try[current_model_idx]
         active_key = api_keys[current_key_index]
         
-        model = self.configure_genai(active_key, active_model_name, sys_instruction_text)
+        client = self.create_client(active_key)
+        if not client:
+            self.log("🛑 CRITICAL: Failed to initialize API Client.")
+            self.reset_ui()
+            return
         
         self.log(f"🔹 Active Model: {active_model_name}")
         self.log(f"🔑 Active Key: #{current_key_index + 1}")
@@ -289,18 +332,27 @@ class CaptionApp:
                     self.log(f"⏳ Processing '{filename}'...")
                     img = Image.open(image_path)
                     
-                    # --- REFACTORED GENERATION CALL ---
-                    # Explicitly forcing all safety thresholds to BLOCK_NONE
-                    response = model.generate_content(
-                        [prompt_text, img],
-                        safety_settings={
-                            "HARM_CATEGORY_HARASSMENT": "BLOCK_NONE",
-                            "HARM_CATEGORY_HATE_SPEECH": "BLOCK_NONE",
-                            "HARM_CATEGORY_SEXUALLY_EXPLICIT": "BLOCK_NONE",
-                            "HARM_CATEGORY_DANGEROUS_CONTENT": "BLOCK_NONE",
-                        }
+                    # --- NEW SDK GENERATION CALL ---
+                    # 1. Setup config (equivalent of the old safety settings + system prompt)
+                    config_args = {
+                        "safety_settings": [
+                            types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="BLOCK_NONE"),
+                            types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="BLOCK_NONE"),
+                            types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="BLOCK_NONE"),
+                            types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="BLOCK_NONE"),
+                        ]
+                    }
+                    if sys_instruction_text:
+                        config_args["system_instruction"] = sys_instruction_text
+
+                    config = types.GenerateContentConfig(**config_args)
+
+                    # 2. Make the API Call directly using client.models.generate_content
+                    response = client.models.generate_content(
+                        model=active_model_name,
+                        contents=[prompt_text, img],
+                        config=config
                     )
-                    # ----------------------------------
 
                     caption = response.text.strip().replace('\n', ' ')
 
@@ -312,39 +364,56 @@ class CaptionApp:
                     break # Break retry loop, move to next image
 
                 except Exception as e:
-                    error_str = str(e)
-                    # Check for Quota/Limits
-                    if "429" in error_str or "ResourceExhausted" in error_str or "Quota exceeded" in error_str:
+                    error_str = str(e).lower()
+                    
+                    # 1. Check for Quota/Limits
+                    if "429" in error_str or "resourceexhausted" in error_str or "quota exceeded" in error_str:
                         self.log(f"⚠️ Limit hit on Key #{current_key_index + 1} ({active_model_name})")
                         
-                        # 1. Try Next Key
                         current_key_index += 1
                         
-                        # 2. If Keys Exhausted, Switch Model and Reset Keys
+                        # If Keys Exhausted, Switch Model and Reset Keys
                         if current_key_index >= len(api_keys):
                             self.log(f"🔻 All keys exhausted for {active_model_name}.")
                             current_key_index = 0 # Reset to first key
-                            current_model_index += 1 # Move to next model
+                            current_model_idx += 1 # Move to next model
 
-                            if current_model_index >= len(MODEL_OPTIONS):
+                            if current_model_idx >= len(all_models_to_try):
                                 self.log("🛑 CRITICAL: All Models and All Keys exhausted. Stopping.")
                                 self.reset_ui()
                                 return
                             
-                            active_model_name = MODEL_OPTIONS[current_model_index]
+                            active_model_name = all_models_to_try[current_model_idx]
                             self.log(f"🔄 SWITCHING MODEL to: {active_model_name}")
-                        
                         else:
                             self.log(f"🔄 Switching to Key #{current_key_index + 1}")
 
-                        # Reconfigure with new state
                         active_key = api_keys[current_key_index]
-                        model = self.configure_genai(active_key, active_model_name, sys_instruction_text)
-                        time.sleep(2) # Cooldown for switch
-                        continue # Retry the same image with new config
+                        client = self.create_client(active_key)
+                        time.sleep(2) 
+                        continue 
+                    
+                    # 2. Check for invalid or non-existent model (e.g., user made a typo in the custom textbox)
+                    elif "not found" in error_str or "invalid" in error_str:
+                        self.log(f"⚠️ Model '{active_model_name}' invalid/not found. Skipping model...")
+                        current_key_index = 0
+                        current_model_idx += 1
+                        
+                        if current_model_idx >= len(all_models_to_try):
+                            self.log("🛑 CRITICAL: Run out of valid models. Stopping.")
+                            self.reset_ui()
+                            return
+                        
+                        active_model_name = all_models_to_try[current_model_idx]
+                        self.log(f"🔄 SWITCHING MODEL to: {active_model_name}")
+                        
+                        active_key = api_keys[current_key_index]
+                        client = self.create_client(active_key)
+                        time.sleep(1)
+                        continue
 
+                    # 3. Other errors (corrupt image, API timeouts, etc)
                     else:
-                        # Non-quota error (corrupt image, etc)
                         self.log(f"❌ Error on '{filename}': {e}")
                         break # Skip image
 
@@ -354,6 +423,7 @@ class CaptionApp:
     def reset_ui(self):
         self.is_running = False
         self.btn_start.config(state='normal', text="Start Captioning (Saves Config)")
+
 
 if __name__ == "__main__":
     root = tk.Tk()
