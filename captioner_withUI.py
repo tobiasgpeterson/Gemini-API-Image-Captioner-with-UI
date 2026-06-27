@@ -1,5 +1,6 @@
 #build .exe with:
-#pyinstaller --onefile captioner_withUI.py
+#python -m PyInstaller --onefile --windowed --collect-all google --copy-metadata google-genai captioner_withUI.py
+#make sure .venv is active
 
 #generated using ai slop, output verified by real programmer TM
 
